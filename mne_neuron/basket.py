@@ -1,23 +1,27 @@
 """Model for inhibitory cell class."""
 
-from neuron import h as nrn
+# Authors: Mainak Jas <mainak.jas@telecom-paristech.fr>
+#          Sam Neymotin <samnemo@gmail.com>
 
-from .cell import Cell
+from .cell import _Cell
 
 # Units for e: mV
 # Units for gbar: S/cm^2 unless otherwise noted
 
 
-class BasketSingle (Cell):
+class BasketSingle(_Cell):
     """Inhibitory cell class."""
 
     def __init__(self, gid, pos, cell_name='Basket'):
         self.props = self.__set_props(cell_name, pos)
-        Cell.__init__(self, gid, self.props)
+        _Cell.__init__(self, gid, self.props)
         # store cell name for later
         self.name = cell_name
         # set 3D shape - unused for now but a prototype
         self.__shape_change()
+
+    def _biophysics(self):
+        self.soma.insert('hh2')
 
     def __set_props(self, cell_name, pos):
         return {
@@ -34,108 +38,59 @@ class BasketSingle (Cell):
     # convention is followed in this function ease use of gui.
     def __shape_change(self):
         self.shape_soma()
-        """
-        s = self.soma
-        for i in range(int(s.n3d())):
-            h.pt3dchange(i, self.pos[0]*100 + s.x3d(i), -self.pos[2] + s.y3d(i),
-                                     self.pos[1] * 100 + s.z3d(i), s.diam3d(i), sec=s)
-        """
+
+    # creation of synapses
+    def _synapse_create(self):
+        # creates synapses onto this cell
+        self.soma_ampa = self.syn_ampa_create(self.soma(0.5))
+        self.soma_gabaa = self.syn_gabaa_create(self.soma(0.5))
+        self.soma_nmda = self.syn_nmda_create(self.soma(0.5))
+
+    def _connect(self, gid, gid_dict, pos_dict, p, type_src, name_src,
+                 lamtha=3., receptor='ampa'):
+        for gid_src, pos in zip(gid_dict[type_src],
+                                pos_dict[type_src]):
+            if gid_src == gid:
+                continue
+            nc_dict = {
+                'pos_src': pos,
+                'A_weight': p['gbar_%s_%s' % (name_src, self.name)],
+                'A_delay': 1.,
+                'lamtha': lamtha,
+                'threshold': p['threshold'],
+                'type_src': type_src
+            }
+
+            getattr(self, 'ncfrom_%s' % name_src).append(
+                self.parconnect_from_src(
+                    gid_src, nc_dict, getattr(self, 'soma_%s' % receptor)))
 
 
 class L2Basket(BasketSingle):
+    """Class for layer 2 basket cells."""
+
     def __init__(self, gid=-1, pos=-1):
         # BasketSingle.__init__(self, pos, L, diam, Ra, cm)
         # Note: Basket cell properties set in BasketSingle())
         BasketSingle.__init__(self, gid, pos, 'L2Basket')
         self.celltype = 'L2_basket'
 
-        self.__synapse_create()
-        self.__biophysics()
-
-    # creation of synapses
-    def __synapse_create(self):
-        # creates synapses onto this cell
-        self.soma_ampa = self.syn_ampa_create(self.soma(0.5))
-        self.soma_gabaa = self.syn_gabaa_create(self.soma(0.5))
-        self.soma_nmda = self.syn_nmda_create(self.soma(0.5))
-
-    def __biophysics(self):
-        self.soma.insert('hh2')
-
-    # insert IClamps in all situations
-    def create_all_IClamp(self, p):
-        # list of sections for this celltype
-        sect_list_IClamp = [
-            'soma',
-        ]
-
-        # some parameters
-        t_delay = p['Itonic_t0_L2Basket']
-
-        # T = -1 means use nrn.tstop
-        if p['Itonic_T_L2Basket'] == -1:
-            t_dur = nrn.tstop - t_delay
-
-        else:
-            t_dur = p['Itonic_T_L2Basket'] - t_delay
-
-        # t_dur must be nonnegative, I imagine
-        if t_dur < 0.:
-            t_dur = 0.
-
-        # properties of the IClamp
-        props_IClamp = {
-            'loc': 0.5,
-            'delay': t_delay,
-            'dur': t_dur,
-            'amp': p['Itonic_A_L2Basket']
-        }
-
-        # iterate through list of sect_list_IClamp to create a persistent IClamp object
-        # the insert_IClamp procedure is in Cell() and checks on names
-        # so names must be actual section names, or else it will fail silently
-        # self.list_IClamp as a variable is guaranteed in Cell()
-        self.list_IClamp = [self.insert_IClamp(
-            sect_name, props_IClamp) for sect_name in sect_list_IClamp]
+        self._synapse_create()
+        self._biophysics()
 
     # par connect between all presynaptic cells
     # no connections from L5Pyr or L5Basket to L2Baskets
     def parconnect(self, gid, gid_dict, pos_dict, p):
-        # FROM L2 pyramidals TO this cell
-        for gid_src, pos in zip(gid_dict['L2_pyramidal'], pos_dict['L2_pyramidal']):
-            nc_dict = {
-                'pos_src': pos,
-                'A_weight': p['gbar_L2Pyr_L2Basket'],
-                'A_delay': 1.,
-                'lamtha': 3.,
-                'threshold': p['threshold'],
-                'type_src': 'L2_pyramidal'
-            }
-
-            self.ncfrom_L2Pyr.append(self.parconnect_from_src(
-                gid_src, nc_dict, self.soma_ampa))
-
-        # FROM other L2Basket cells
-        for gid_src, pos in zip(gid_dict['L2_basket'], pos_dict['L2_basket']):
-            # no autapses
-            # if gid_src != gid:
-            nc_dict = {
-                'pos_src': pos,
-                'A_weight': p['gbar_L2Basket_L2Basket'],
-                'A_delay': 1.,
-                'lamtha': 20.,
-                'threshold': p['threshold'],
-                'type_src': 'L2_basket'
-            }
-
-            self.ncfrom_L2Basket.append(self.parconnect_from_src(
-                gid_src, nc_dict, self.soma_gabaa))
+        self._connect(gid, gid_dict, pos_dict, p, 'L2_pyramidal', 'L2Pyr')
+        self._connect(gid, gid_dict, pos_dict, p, 'L2_basket', 'L2Basket',
+                      lamtha=20., receptor='gabaa')
 
     # this function might make more sense as a method of net?
     # par: receive from external inputs
     def parreceive(self, gid, gid_dict, pos_dict, p_ext):
         # for some gid relating to the input feed:
-        for gid_src, p_src, pos in zip(gid_dict['extinput'], p_ext, pos_dict['extinput']):
+        for gid_src, p_src, pos in zip(gid_dict['extinput'],
+                                       p_ext, pos_dict['extinput']):
             # check if AMPA params are defined in the p_src
             if 'L2Basket_ampa' in p_src.keys():
                 # create an nc_dict
@@ -194,15 +149,17 @@ class L2Basket(BasketSingle):
                     'type_src': type
                 }
 
-                # connections depend on location of input - why only for L2 basket and not L5 basket?
-                if p_ext['loc'] is 'proximal':
+                # connections depend on location of input - why only
+                # for L2 basket and not L5 basket?
+                if p_ext['loc'] == 'proximal':
                     self.ncfrom_ev.append(self.parconnect_from_src(
                         gid_ev, nc_dict_ampa, self.soma_ampa))
-                    # NEW: note that default/original is 0 nmda weight for the soma (for prox evoked)
+                    # NEW: note that default/original is 0 nmda weight for
+                    # the soma (for prox evoked)
                     self.ncfrom_ev.append(self.parconnect_from_src(
                         gid_ev, nc_dict_nmda, self.soma_nmda))
 
-                elif p_ext['loc'] is 'distal':
+                elif p_ext['loc'] == 'distal':
                     self.ncfrom_ev.append(self.parconnect_from_src(
                         gid_ev, nc_dict_ampa, self.soma_ampa))
                     self.ncfrom_ev.append(self.parconnect_from_src(
@@ -210,7 +167,8 @@ class L2Basket(BasketSingle):
 
         elif type == 'extgauss':
             # gid is this cell's gid
-            # gid_dict is the whole dictionary, including the gids of the extgauss
+            # gid_dict is the whole dictionary, including the gids
+            # of the extgauss
             # pos_list is also the pos of the extgauss (net origin)
             # p_ext_gauss are the params (strength, etc.)
             # I recognize this is ugly (hack)
@@ -222,7 +180,8 @@ class L2Basket(BasketSingle):
                 # this is a dumb place to put this information
                 gid_extgauss = gid + gid_dict['extgauss'][0]
 
-                # gid works here because there are as many pos items in pos_dict['extgauss'] as there are cells
+                # gid works here because there are as many pos
+                # items in pos_dict['extgauss'] as there are cells
                 nc_dict = {
                     'pos_src': pos_dict['extgauss'][gid],
                     # index 0 is ampa weight
@@ -269,106 +228,21 @@ class L5Basket(BasketSingle):
         BasketSingle.__init__(self, gid, pos, 'L5Basket')
         self.celltype = 'L5_basket'
 
-        self.__synapse_create()
-        self.__biophysics()
-
-    # creates synapses
-    def __synapse_create(self):
-        # creates synapses onto this cell
-        self.soma_ampa = self.syn_ampa_create(self.soma(0.5))
-        self.soma_nmda = self.syn_nmda_create(self.soma(0.5))
-        self.soma_gabaa = self.syn_gabaa_create(self.soma(0.5))
-
-    # insert IClamps in all situations
-    def create_all_IClamp(self, p):
-        """ temporarily an external function taking the p dict
-        """
-        # list of sections for this celltype
-        sect_list_IClamp = [
-            'soma',
-        ]
-
-        # some parameters
-        t_delay = p['Itonic_t0_L5Basket']
-
-        # T = -1 means use nrn.tstop
-        if p['Itonic_T_L5Basket'] == -1:
-            t_dur = nrn.tstop - t_delay
-
-        else:
-            t_dur = p['Itonic_T_L5Basket'] - t_delay
-
-        # t_dur must be nonnegative, I imagine
-        if t_dur < 0.:
-            t_dur = 0.
-
-        # properties of the IClamp
-        props_IClamp = {
-            'loc': 0.5,
-            'delay': t_delay,
-            'dur': t_dur,
-            'amp': p['Itonic_A_L5Basket']
-        }
-
-        # iterate through list of sect_list_IClamp to create a persistent IClamp object
-        # the insert_IClamp procedure is in Cell() and checks on names
-        # so names must be actual section names, or else it will fail silently
-        self.list_IClamp = [self.insert_IClamp(
-            sect_name, props_IClamp) for sect_name in sect_list_IClamp]
-
-    # defines biophysics
-    def __biophysics(self):
-        self.soma.insert('hh2')
+        self._synapse_create()
+        self._biophysics()
 
     # connections FROM other cells TO this cell
     # there are no connections from the L2Basket cells. congrats!
     def parconnect(self, gid, gid_dict, pos_dict, p):
-        # FROM other L5Basket cells TO this cell
-        for gid_src, pos in zip(gid_dict['L5_basket'], pos_dict['L5_basket']):
-            if gid_src != gid:
-                nc_dict = {
-                    'pos_src': pos,
-                    'A_weight': p['gbar_L5Basket_L5Basket'],
-                    'A_delay': 1.,
-                    'lamtha': 20.,
-                    'threshold': p['threshold'],
-                    'type_src': 'L5_basket'
-                }
-
-                self.ncfrom_L5Basket.append(self.parconnect_from_src(
-                    gid_src, nc_dict, self.soma_gabaa))
-
-        # FROM other L5Pyr cells TO this cell
-        for gid_src, pos in zip(gid_dict['L5_pyramidal'], pos_dict['L5_pyramidal']):
-            nc_dict = {
-                'pos_src': pos,
-                'A_weight': p['gbar_L5Pyr_L5Basket'],
-                'A_delay': 1.,
-                'lamtha': 3.,
-                'threshold': p['threshold'],
-                'type_src': 'L5_pyramidal'
-            }
-
-            self.ncfrom_L5Pyr.append(self.parconnect_from_src(
-                gid_src, nc_dict, self.soma_ampa))
-
-        # FROM other L2Pyr cells TO this cell
-        for gid_src, pos in zip(gid_dict['L2_pyramidal'], pos_dict['L2_pyramidal']):
-            nc_dict = {
-                'pos_src': pos,
-                'A_weight': p['gbar_L2Pyr_L5Basket'],
-                'A_delay': 1.,
-                'lamtha': 3.,
-                'threshold': p['threshold'],
-                'type_src': 'L2_pyramidal'
-            }
-
-            self.ncfrom_L2Pyr.append(self.parconnect_from_src(
-                gid_src, nc_dict, self.soma_ampa))
+        self._connect(gid, gid_dict, pos_dict, p, 'L5_basket', 'L5Basket',
+                      lamtha=20., receptor='gabaa')
+        self._connect(gid, gid_dict, pos_dict, p, 'L5_pyramidal', 'L5Pyr')
+        self._connect(gid, gid_dict, pos_dict, p, 'L2_pyramidal', 'L2Pyr')
 
     # parallel receive function parreceive()
     def parreceive(self, gid, gid_dict, pos_dict, p_ext):
-        for gid_src, p_src, pos in zip(gid_dict['extinput'], p_ext, pos_dict['extinput']):
+        for gid_src, p_src, pos in zip(gid_dict['extinput'], p_ext,
+                                       pos_dict['extinput']):
             # Check if AMPA params are define in p_src
             if 'L5Basket_ampa' in p_src.keys():
                 nc_dict_ampa = {
@@ -430,13 +304,15 @@ class L5Basket(BasketSingle):
                 self.ncfrom_ev.append(self.parconnect_from_src(
                     gid_ev, nc_dict_ampa, self.soma_ampa))
 
-                # NEW: note that default/original is 0 nmda weight for the soma (both prox and distal evoked)
+                # NEW: note that default/original is 0 nmda weight
+                # for the soma (both prox and distal evoked)
                 self.ncfrom_ev.append(self.parconnect_from_src(
                     gid_ev, nc_dict_nmda, self.soma_nmda))
 
         elif type == 'extgauss':
             # gid is this cell's gid
-            # gid_dict is the whole dictionary, including the gids of the extgauss
+            # gid_dict is the whole dictionary, including the gids
+            # of the extgauss
             # pos_dict is also the pos of the extgauss (net origin)
             # p_ext_gauss are the params (strength, etc.)
             if 'L5_basket' in p_ext.keys():

@@ -1,16 +1,28 @@
-# feed.py - establishes FeedExt(), ParFeedAll()
-#
-# v 1.10.0-py35
-# rev 2016-05-01 (SL: updated for python3)
-# last major: (SL: toward python3)
+"""External feed to network."""
+
+# Authors: Mainak Jas <mainak.jas@telecom-paristech.fr>
+#          Sam Neymotin <samnemo@gmail.com>
 
 import numpy as np
 from neuron import h
 
 
-class ParFeedAll ():
-    # p_ext has a different structure for the extinput
-    # usually, p_ext is a dict of cell types
+class ExtFeed(object):
+    """"The ExtFeed class.
+
+    Parameters
+    ----------
+    ty : str
+        The feed type.
+    celltype : str | None
+        The cell type.
+    p_ext : dict | list (XXX: check)
+        Parameters of external input.
+        p_ext has a different structure for the extinput
+        usually, p_ext is a dict of cell types
+    gid : int
+        The gid.
+    """
 
     def __init__(self, ty, celltype, p_ext, gid):
         # VecStim setup
@@ -24,14 +36,6 @@ class ParFeedAll ():
         self.set_prng()  # sets seeds for random num generator
         # sets event times into self.eventvec and plays into self.vs (VecStim)
         self.set_event_times()
-
-    # inc random number generator seeds
-    def inc_prng(self, inc):
-        self.seed += inc
-        self.prng = np.random.RandomState(self.seed)
-        if hasattr(self, 'seed2'):
-            self.seed2 += inc
-            self.prng2 = np.random.RandomState(self.seed2)
 
     def set_prng(self, seed=None):
         if seed is None:  # no seed specified then use p_ext to determine seed
@@ -115,7 +119,6 @@ class ParFeedAll ():
 
     # mu and sigma vals come from p
     def __create_evoked(self, inc=0.0):
-        #print("__create_evoked", self.p_ext)
         if self.celltype in self.p_ext.keys():
             # assign the params
             mu = self.p_ext['t0'] + inc
@@ -139,11 +142,10 @@ class ParFeedAll ():
         return self.eventvec.size() > 0
 
     def __create_extgauss(self):
-        # print("__create_extgauss")
         # assign the params
         if self.p_ext[self.celltype][0] <= 0.0 and \
-           self.p_ext[self.celltype][1] <= 0.0:
-               return False  # 0 ampa and 0 nmda weight
+                self.p_ext[self.celltype][1] <= 0.0:
+            return False  # 0 ampa and 0 nmda weight
         # print('gauss params:',self.p_ext[self.celltype])
         mu = self.p_ext[self.celltype][3]
         sigma = self.p_ext[self.celltype][4]
@@ -170,8 +172,8 @@ class ParFeedAll ():
         # If t0 is -1, randomize start time of inputs
         if t0 == -1:
             t0 = self.prng.uniform(25., 125.)
-            #print(self.ty,'t0 was -1; now', t0,'seed:',self.seed)
-        elif self.p_ext['t0_stdev'] > 0.0:  # randomize start time based on t0_stdev
+        # randomize start time based on t0_stdev
+        elif self.p_ext['t0_stdev'] > 0.0:
             # start time uses different prng
             t0 = self.prng2.normal(t0, self.p_ext['t0_stdev'])
         f_input = self.p_ext['f_input']

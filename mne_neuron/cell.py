@@ -1,8 +1,7 @@
-# cell.py - establish class def for general cell features
-#
-# v 1.10.0-py35
-# rev 2016-05-01 (SL: python3 compatibility)
-# last rev: (SL: added list_IClamp as a pre-defined variable)
+"""Establish class def for general cell features."""
+
+# Authors: Mainak Jas <mainak.jas@telecom-paristech.fr>
+#          Sam Neymotin <samnemo@gmail.com>
 
 import numpy as np
 from neuron import h
@@ -15,12 +14,20 @@ h("dp_total_L5 = 0.")  # put here since these variables used in cells
 # Units for gbar: S/cm^2
 
 
-class Cell():
-    """Create a cell class."""
+class _Cell(object):
+    """Create a cell object.
+
+    Parameters
+    ----------
+    gid : int
+        The cell ID
+    soma_props : dict
+        The properties of the soma. Must contain
+        keys 'L', 'diam', and 'pos'
+    """
 
     def __init__(self, gid, soma_props):
         self.gid = gid
-        self.pc = h.ParallelContext()  # Parallel methods
         # make L_soma and diam_soma elements of self
         # Used in shape_change() b/c func clobbers self.soma.L, self.soma.diam
         self.L = soma_props['L']
@@ -80,12 +87,8 @@ class Cell():
         return ((minx, maxx), (miny, maxy), (minz, maxz))
 
     def translate3d(self, dx, dy, dz):
-        #s = self.soma
-        # for i in range(s.n3d()):
-        #  h.pt3dchange(i,s.x3d(i)+dx,s.y3d(i)+dy,s.z3d(i)+dz,s.diam3d(i),sec=s)
         for s in self.get_sections():
             for i in range(s.n3d()):
-                # print(s,i,s.x3d(i)+dx,s.y3d(i)+dy,s.z3d(i)+dz,s.diam3d(i))
                 h.pt3dchange(i, s.x3d(i) + dx, s.y3d(i) + dy,
                              s.z3d(i) + dz, s.diam3d(i), sec=s)
 
@@ -104,12 +107,13 @@ class Cell():
 
     # two things need to happen here for h:
     # 1. dipole needs to be inserted into each section
-    # 2. a list needs to be created with a Dipole (Point Process) in each section at position 1
+    # 2. a list needs to be created with a Dipole (Point Process) in each
+    #    section at position 1
     # In Cell() and not Pyr() for future possibilities
     def dipole_insert(self, yscale):
-            # insert dipole into each section of this cell
-            # dends must have already been created!!
-            # it's easier to use wholetree here, this includes soma
+        # insert dipole into each section of this cell
+        # dends must have already been created!!
+        # it's easier to use wholetree here, this includes soma
         seclist = h.SectionList()
         seclist.wholetree(sec=self.soma)
         # create a python section list list_all
@@ -134,18 +138,21 @@ class Cell():
             loc = np.array([seg.x for seg in sect])
             # these are the positions, including 0 but not L
             pos = np.array([seg.x for seg in sect.allseg()])
-            # diff in yvals, scaled against the pos np.array. y_long as in longitudinal
+            # diff in yvals, scaled against the pos np.array. y_long as
+            # in longitudinal
             y_scale = (yscale[sect.name()] * sect.L) * pos
             # y_long = (h.y3d(1, sec=sect) - h.y3d(0, sec=sect)) * pos
             # diff values calculate length between successive section points
             y_diff = np.diff(y_scale)
             # y_diff = np.diff(y_long)
-            # doing range to index multiple values of the same np.array simultaneously
+            # doing range to index multiple values of the same
+            # np.array simultaneously
             for i in range(len(loc)):
                 # assign the ri value to the dipole
                 sect(loc[i]).dipole.ri = h.ri(loc[i], sec=sect)
                 # range variable 'dipole'
-                # set pointers to previous segment's voltage, with boundary condition
+                # set pointers to previous segment's voltage, with
+                # boundary condition
                 if i:
                     h.setpointer(sect(loc[i - 1])._ref_v,
                                  'pv', sect(loc[i]).dipole)
@@ -199,12 +206,28 @@ class Cell():
                 self.dict_currents[key].record(self.synapses[key]._ref_i)
         except:
             print(
-                "Warning in Cell(): record_current_soma() was called, but no self.synapses dict was found")
+                "Warning in Cell(): record_current_soma() was called,"
+                " but no self.synapses dict was found")
             pass
 
     # General fn that creates any Exp2Syn synapse type
     # requires dictionary of synapse properties
     def syn_create(self, secloc, p):
+        """Create an h.Exp2Syn synapse.
+
+        Parameters
+        ----------
+        p : dict
+            Should contain keys
+                - 'e' (reverse potential)
+                - 'tau1' (rise time)
+                - 'tau2' (decay time)
+
+        Returns
+        -------
+        syn : instance of h.Exp2Syn
+            A two state kinetic scheme synapse.
+        """
         syn = h.Exp2Syn(secloc)
         syn.e = p['e']
         syn.tau1 = p['tau1']
@@ -258,8 +281,23 @@ class Cell():
 
     def parconnect_from_src(self, gid_presyn, nc_dict, postsyn):
         """Parallel receptor-centric connect FROM presyn TO this cell,
-           based on GID."""
-        # nc_dict keys are: {pos_src, A_weight, A_delay, lamtha}
+           based on GID.
+
+        Parameters
+        ----------
+        gid_presyn : int
+            The cell ID of the presynaptic neuron
+        nc_dict : dict
+            Dictionary with keys: pos_src, A_weight, A_delay, lamtha
+            Defines the connection parameters
+        postsyn : str
+            The postsynaptic cell object.
+
+        Returns
+        -------
+        nc : instance of h.NetCon
+            A network connection object.
+        """
         nc = self.pc.gid_connect(gid_presyn, postsyn)
         # calculate distance between cell positions with pardistance()
         d = self.__pardistance(nc_dict['pos_src'])
@@ -269,18 +307,14 @@ class Cell():
             np.exp(-(d**2) / (nc_dict['lamtha']**2))
         nc.delay = nc_dict['A_delay'] / \
             (np.exp(-(d**2) / (nc_dict['lamtha']**2)))
-        # print("parconnect_from_src in cell.py, weight = ",nc.weight[0])
-        #fp = open('delays.txt','a'); fp.write(str(d)+' '+str(nc_dict['A_delay'])+' ' +str(nc.delay)+'\n'); fp.close()
-        #fp = open('weights.txt','a'); fp.write(str(d)+' '+str(nc_dict['A_weight'])+' ' +str(nc.weight[0])+'\n'); fp.close()
-        #fp = open('prepostty.txt','a'); fp.write(nc_dict['type_src']+' '+self.celltype+'\n'); fp.close()
 
         return nc
 
-    # pardistance function requires pre position, since it is calculated on POST cell
+    # pardistance function requires pre position, since it is
+    # calculated on POST cell
     def __pardistance(self, pos_pre):
         dx = self.pos[0] - pos_pre[0]
         dy = self.pos[1] - pos_pre[1]
-        #dz = self.pos[2] - pos_pre[2]
         return np.sqrt(dx**2 + dy**2)
 
     # Define 3D shape of soma -- is needed for gui representation of cell
@@ -291,3 +325,44 @@ class Cell():
         # self.soma.diam set above
         h.pt3dadd(0, 0, 0, self.diam, sec=self.soma)
         h.pt3dadd(0, self.L, 0, self.diam, sec=self.soma)
+
+    # insert IClamps in all situations
+    def create_all_IClamp(self, p):
+        """ temporarily an external function taking the p dict
+        """
+        # list of sections for this celltype
+        sect_list_IClamp = [
+            'soma',
+        ]
+
+        name_key = self.name
+        if 'Pyr' in self.name:
+            name_key = '%s_soma' % self.name
+        # some parameters
+        t_delay = p['Itonic_t0_%s' % name_key]
+
+        # T = -1 means use h.tstop
+        if p['Itonic_T_%s' % name_key] == -1:
+            t_dur = p['tstop'] - t_delay
+
+        else:
+            t_dur = p['Itonic_T_%s' % name_key] - t_delay
+
+        # t_dur must be nonnegative, I imagine
+        if t_dur < 0.:
+            t_dur = 0.
+
+        # properties of the IClamp
+        props_IClamp = {
+            'loc': 0.5,
+            'delay': t_delay,
+            'dur': t_dur,
+            'amp': p['Itonic_A_%s' % name_key]
+        }
+
+        # iterate through list of sect_list_IClamp to create a persistent
+        # IClamp object
+        # the insert_IClamp procedure is in Cell() and checks on names
+        # so names must be actual section names, or else it will fail silently
+        self.list_IClamp = [self.insert_IClamp(
+            sect_name, props_IClamp) for sect_name in sect_list_IClamp]
