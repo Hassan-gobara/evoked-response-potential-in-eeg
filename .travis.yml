@@ -22,9 +22,14 @@ install:
     - install_prefix=~
     - conda create -n testenv --yes pip python=${PYTHON_VERSION}
     - source activate testenv
+    - https://github.com/Hassan-gobara/evoked-response-potential-in-eeg.git no_parallelcontext
     - conda install --yes scipy numpy matplotlib
     - pip install flake8 pytest pytest-cov
     - pip install mpi4py
+      git pull origin add_test
+    - conda install --yes scipy numpy matplotlib pyqt pyqtgraph pyopengl
+    - pip install mpi4py mne
+      git checkout no_parallelcontext add_test
     - pip install coverage coveralls
     - |
       git clone https://github.com/neuronsimulator/nrn
@@ -41,8 +46,15 @@ install:
       make
       python setup.py develop
 script:
+git checkout no_parallelcontext 
     - python examples/plot_simulate_evoked.py
     - flake8 --count mne_neuron
     - py.test --cov=mne_neuron mne_neuron/tests/
 after_success:
     - bash <(curl -s https://codecov.io/bash)
+      git checkout no_parallelcontext
+    - python plot_simulate_evoked.py
+    - pytest mne_neuron/tests/test_mne_neuron.py
+      git merge add_testadd_test
+      git push -u origin no_parallelcontext
+      
